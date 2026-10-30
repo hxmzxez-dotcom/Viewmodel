@@ -1,9 +1,9 @@
 {
   "schemaVersion": 1,
   "id": "viewmodel",
-  "version": "${version}",
+  "version": "1.0.0",
   "name": "ViewModel",
-  "description": "Sunucu/anticheat test modu.",
+  "description": "is a lightweight, client-side mod that lets you fully customize the position, rotation, and scale of items in your hands.",
   "authors": ["me"],
   "icon": "assets/viewmodel/icon.png",
   "environment": "client",
