@@ -31,7 +31,7 @@ public class ViewModelMod implements ClientModInitializer {
     enum State { IDLE, GLIDE_START, ROCKET, APPROACH, STRIKE, ENTER, LAND }
 
     private static boolean enabled = false;
-    private static int bindKey = InputUtil.GLFW_KEY_G; // varsayilan G
+    private static int bindKey = InputUtil.GLFW_KEY_G;
     private static boolean keyWasDown = false;
 
     private State state = State.IDLE;
@@ -44,6 +44,7 @@ public class ViewModelMod implements ClientModInitializer {
     private Vec3d pushDir;
     private net.minecraft.util.math.BlockPos targetCell;
     private int cooldown = 0;
+    private int hits = 0;
 
     private static final double REACH = 3.0;
     private static final int TIMEOUT = 40;
@@ -139,154 +140,3 @@ public class ViewModelMod implements ClientModInitializer {
                 if (timer % 5 == 0) {
                     if (lastDist - dist < 0.8) { finish(p); return; }
                     lastDist = dist;
-                }
-                if (rocketCooldown == 0 && dist > 5) fireRocket(mc, p);
-            }
-            case STRIKE -> {
-                int best = findBestSweepingSlot(mc, p);
-                if (best >= 0) p.getInventory().setSelectedSlot(best);
-
-                Vec3d back = pushDir != null ? pushDir : origin.subtract(p.getPos());
-                if (back.horizontalLength() < 0.5) back = target.getPos().subtract(p.getPos());
-                float yaw = (float) (Math.toDegrees(Math.atan2(-back.x, back.z)));
-                float pitch = 0f;
-                sendLook(p, yaw, pitch);
-
-                mc.interactionManager.attackEntity(p, target);
-                p.swingHand(Hand.MAIN_HAND);
-
-                sendLook(p, p.getYaw(), p.getPitch());
-                if (pushDir != null) { state = State.ENTER; timer = TIMEOUT - 8; enterStep(p); }
-                else { state = State.LAND; timer = TIMEOUT - 10; }
-            }
-            case ENTER -> enterStep(p);
-            case LAND -> {
-                if (headroom(mc, p.getBlockPos()) == 1) {
-                    info("§6[⚔ ViewModel] §f1 blokluk alana gecildi, durdu.");
-                    finish(p);
-                } else if (p.isOnGround()) {
-                    finish(p);
-                }
-            }
-            default -> {}
-        }
-    }
-
-    private void enterStep(ClientPlayerEntity p) {
-        MinecraftClient mc = MinecraftClient.getInstance();
-        if (p.getBlockPos().equals(targetCell) && headroom(mc, targetCell) == 1) {
-            info("§6[⚔ ViewModel] §f1 blokluk alana gecildi, durdu.");
-            finish(p); return;
-        }
-        Vec3d d = Vec3d.ofBottomCenter(targetCell).subtract(p.getPos());
-        Vec3d v = new Vec3d(d.x, 0, d.z);
-        if (v.lengthSquared() > 1.0E-4) v = v.normalize().multiply(0.45);
-        p.setVelocity(v.x, p.getVelocity().y, v.z);
-    }
-
-    private void fireRocket(MinecraftClient mc, ClientPlayerEntity p) {
-        int slot = findSlot(p, Items.FIREWORK_ROCKET);
-        if (slot < 0) return;
-        p.getInventory().setSelectedSlot(slot);
-
-        Vec3d d = target.getEyePos().subtract(p.getEyePos());
-        float yaw = (float) Math.toDegrees(Math.atan2(-d.x, d.z));
-        float pitch = (float) -Math.toDegrees(Math.atan2(d.y, Math.hypot(d.x, d.z)));
-
-        float oy = p.getYaw(), op = p.getPitch();
-        p.setYaw(yaw); p.setPitch(pitch);
-        mc.interactionManager.interactItem(p, Hand.MAIN_HAND);
-        p.setYaw(oy); p.setPitch(op);
-        rocketCooldown = 8;
-    }
-
-    private void sendLook(ClientPlayerEntity p, float yaw, float pitch) {
-        p.networkHandler.sendPacket(new PlayerMoveC2SPacket.LookAndOnGround(
-                yaw, pitch, p.isOnGround(), p.horizontalCollision));
-    }
-
-    private int findBestSweepingSlot(MinecraftClient mc, ClientPlayerEntity p) {
-        RegistryEntry<Enchantment> sweep = mc.world.getRegistryManager()
-                .getOrThrow(RegistryKeys.ENCHANTMENT).getOrThrow(Enchantments.SWEEPING_EDGE);
-        int best = -1, bestLvl = -1;
-        for (int i = 0; i < 9; i++) {
-            ItemStack s = p.getInventory().getStack(i);
-            if (s.isEmpty()) continue;
-            int lvl = EnchantmentHelper.getLevel(sweep, s);
-            if (lvl > bestLvl) { bestLvl = lvl; best = i; }
-        }
-        return bestLvl > 0 ? best : -1;
-    }
-
-    private int findSlot(ClientPlayerEntity p, net.minecraft.item.Item item) {
-        for (int i = 0; i < 9; i++)
-            if (p.getInventory().getStack(i).isOf(item)) return i;
-        return -1;
-    }
-
-    private int headroom(MinecraftClient mc, net.minecraft.util.math.BlockPos feet) {
-        int n = 0;
-        for (int i = 0; i < 3; i++) {
-            if (!mc.world.isAir(feet.up(i))) break;
-            n++;
-        }
-        return n;
-    }
-
-    private PlayerEntity findTightTarget(MinecraftClient mc, ClientPlayerEntity p) {
-        PlayerEntity best = null; double bd = 900;
-        for (PlayerEntity o : mc.world.getPlayers()) {
-            if (o == p) continue;
-            double d = p.squaredDistanceTo(o);
-            if (d > bd) continue;
-            if (headroom(mc, o.getBlockPos()) == 1) { best = o; bd = d; }
-        }
-        return best;
-    }
-
-    private Vec3d findPushDir(MinecraftClient mc, net.minecraft.util.math.BlockPos cell, ClientPlayerEntity p) {
-        net.minecraft.util.math.Direction bestDir = null;
-        boolean bestHasWeb = false;
-        double bestDist = 1e9;
-        for (net.minecraft.util.math.Direction d : net.minecraft.util.math.Direction.Type.HORIZONTAL) {
-            net.minecraft.util.math.BlockPos n = cell.offset(d);
-            if (headroom(mc, n) < 2) continue;
-            boolean web = mc.world.getBlockState(n.up(2)).isOf(net.minecraft.block.Blocks.COBWEB)
-                       || mc.world.getBlockState(n.up(3)).isOf(net.minecraft.block.Blocks.COBWEB);
-            double dist = p.getPos().squaredDistanceTo(Vec3d.ofBottomCenter(n));
-            if ((web && !bestHasWeb) || (web == bestHasWeb && dist < bestDist)) {
-                bestDir = d; bestHasWeb = web; bestDist = dist;
-            }
-        }
-        if (bestDir == null) {
-            Vec3d v = p.getPos().subtract(Vec3d.ofBottomCenter(cell));
-            return new Vec3d(v.x, 0, v.z).normalize();
-        }
-        return new Vec3d(bestDir.getOffsetX(), 0, bestDir.getOffsetZ());
-    }
-
-    private boolean canReach(ClientPlayerEntity p, PlayerEntity t) {
-        Vec3d e = p.getEyePos();
-        net.minecraft.util.math.Box b = t.getBoundingBox();
-        double x = Math.max(b.minX, Math.min(e.x, b.maxX));
-        double y = Math.max(b.minY, Math.min(e.y, b.maxY));
-        double z = Math.max(b.minZ, Math.min(e.z, b.maxZ));
-        return e.squaredDistanceTo(x, y, z) <= REACH * REACH;
-    }
-
-    private void finish(ClientPlayerEntity p) {
-        MinecraftClient mc = MinecraftClient.getInstance();
-        mc.options.jumpKey.setPressed(false);
-        mc.options.sneakKey.setPressed(false);
-        cooldown = (mc.player != null && headroom(mc, mc.player.getBlockPos()) == 1) ? 3 : 0;
-        if (p != null && prevSlot >= 0) p.getInventory().setSelectedSlot(prevSlot);
-        reset();
-    }
-
-    private void reset() { pushDir = null; targetCell = null; state = State.IDLE; target = null; prevSlot = -1; timer = 0; }
-
-    private static void info(String s) {
-        MinecraftClient mc = MinecraftClient.getInstance();
-        if (mc.player != null) mc.player.sendMessage(Text.literal(s), false);
-    }
-}
